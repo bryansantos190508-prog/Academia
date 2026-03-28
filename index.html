@@ -960,11 +960,320 @@ async function loadAll() {
             alunoTreinoSelect.innerHTML = '<option value="">Selecione o aluno</option>' + 
                 alunos.map(a => `<option value="${a.id}">${a.nome}</option>`).join('');
         }
-        const firebaseConfig = {
-  apiKey: "AIza...",
-  authDomain: "seu-app.firebaseapp.com",
-  projectId: "seu-app-id",
-  storageBucket: "...",
-  messagingSenderId: "...",
-  appId: "..."
-   }
+        
+        // Dashboard stats
+        const totalAlunos = alunos.length;
+        const totalReceita = pagamentos.reduce((s, p) => s + (p.valor || 0), 0);
+        const mediaMensal = pagamentos.length > 0 ? totalReceita / 12 : 0;
+        
+        document.getElementById('totalAlunos').innerText = totalAlunos;
+        document.getElementById('receita').innerText = totalReceita.toFixed(2);
+        document.getElementById('mediaMensal').innerHTML = `R$ ${mediaMensal.toFixed(2)}`;
+        document.getElementById('planosAtivos').innerText = planos.length;
+        
+        // Alertas de inadimplência
+        const hoje = new Date();
+        const atrasados = alunos.filter(a => a.vencimento && new Date(a.vencimento) < hoje);
+        const alertaDiv = document.getElementById('alerta');
+        if (atrasados.length > 0) {
+            alertaDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${atrasados.length} aluno(s) inadimplente(s): ${atrasados.map(a => a.nome).join(', ')}`;
+            alertaDiv.classList.remove('hidden');
+        } else {
+            alertaDiv.classList.add('hidden');
+        }
+        
+        // Gráfico de receita mensal
+        const meses = {};
+        pagamentos.forEach(p => {
+            if (p.data) {
+                const mes = p.data.split('-')[1];
+                meses[mes] = (meses[mes] || 0) + (p.valor || 0);
+            }
+        });
+        
+        const mesesLabels = Object.keys(meses).sort();
+        const mesesValores = mesesLabels.map(m => meses[m]);
+        
+        const ctx = document.getElementById('grafico').getContext('2d');
+        if (chart) chart.destroy();
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: mesesLabels.map(m => `Mês ${m}`),
+                datasets: [{
+                    label: 'Receita (R$)',
+                    data: mesesValores,
+                    borderColor: '#22c55e',
+                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        labels: { color: '#e2e8f0' }
+                    }
+                },
+                scales: {
+                    y: {
+                        ticks: { color: '#e2e8f0' },
+                        grid: { color: '#334155' }
+                    },
+                    x: {
+                        ticks: { color: '#e2e8f0' },
+                        grid: { color: '#334155' }
+                    }
+                }
+            }
+        });
+        
+        return;
+    }
+    
+    // Modo Firebase real (código original mantido)
+    if (!user) return;
+    
+    // Carregar alunos
+    const alunosSnap = await db.collection('alunos').where('uid', '==', user.uid).get();
+    const alunos = [];
+    alunosSnap.forEach(doc => alunos.push({ id: doc.id, ...doc.data() }));
+    
+    // Carregar planos
+    const planosSnap = await db.collection('planos').where('uid', '==', user.uid).get();
+    const planos = [];
+    planosSnap.forEach(doc => planos.push({ id: doc.id, ...doc.data() }));
+    
+    // Carregar pagamentos
+    const pagSnap = await db.collection('pagamentos').where('uid', '==', user.uid).get();
+    const pagamentos = [];
+    pagSnap.forEach(doc => pagamentos.push({ id: doc.id, ...doc.data() }));
+    
+    // Carregar treinos
+    const treinoSnap = await db.collection('treinos').where('uid', '==', user.uid).get();
+    const treinos = [];
+    treinoSnap.forEach(doc => treinos.push({ id: doc.id, ...doc.data() }));
+    
+    // Atualizar lista de alunos com busca
+    const searchTerm = document.getElementById('searchAluno')?.value?.toLowerCase() || '';
+    const filteredAlunos = alunos.filter(a => a.nome?.toLowerCase().includes(searchTerm));
+    
+    const listaAlunos = document.getElementById('listaAlunos');
+    if (listaAlunos) {
+        listaAlunos.innerHTML = filteredAlunos.map(a => `
+            <li>
+                <div>
+                    <strong>${a.nome}</strong><br>
+                    <small>${a.plano || 'Sem plano'} | Venc: ${a.vencimento || 'Não definido'}</small>
+                    ${a.telefone ? `<br><small>📞 ${a.telefone}</small>` : ''}
+                </div>
+                <button onclick="deleteItem('alunos', '${a.id}')" class="delete-btn">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </li>
+        `).join('');
+    }
+    
+    // Atualizar lista de planos
+    const listaPlanos = document.getElementById('listaPlanos');
+    if (listaPlanos) {
+        listaPlanos.innerHTML = planos.map(p => `
+            <li>
+                <div>
+                    <strong>${p.nome}</strong><br>
+                    <small>R$ ${p.valor.toFixed(2)} | ${p.descricao || ''}</small>
+                </div>
+                <button onclick="deleteItem('planos', '${p.id}')" class="delete-btn">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </li>
+        `).join('');
+    }
+    
+    // Atualizar lista de pagamentos
+    const listaPagamentos = document.getElementById('listaPagamentos');
+    if (listaPagamentos) {
+        listaPagamentos.innerHTML = pagamentos.map(p => `
+            <li>
+                <div>
+                    <strong>${p.nomeAluno}</strong><br>
+                    <small>R$ ${p.valor.toFixed(2)} | ${p.data || 'Data não definida'} | ${p.forma || 'Não especificada'}</small>
+                </div>
+                <button onclick="deleteItem('pagamentos', '${p.id}')" class="delete-btn">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </li>
+        `).join('');
+    }
+    
+    // Atualizar lista de treinos
+    const listaTreinos = document.getElementById('listaTreinos');
+    if (listaTreinos) {
+        listaTreinos.innerHTML = treinos.map(t => `
+            <li>
+                <div>
+                    <strong>${t.nomeAluno}</strong><br>
+                    <small>${t.descricao} | ${t.data || 'Data não definida'}</small>
+                </div>
+                <button onclick="deleteItem('treinos', '${t.id}')" class="delete-btn">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </li>
+        `).join('');
+    }
+    
+    // Atualizar selects
+    const planoAlunoSelect = document.getElementById('planoAluno');
+    if (planoAlunoSelect) {
+        planoAlunoSelect.innerHTML = planos.map(p => `<option value="${p.nome}">${p.nome} - R$ ${p.valor.toFixed(2)}</option>`).join('');
+    }
+    
+    const alunoPagamentoSelect = document.getElementById('alunoPagamento');
+    if (alunoPagamentoSelect) {
+        alunoPagamentoSelect.innerHTML = '<option value="">Selecione o aluno</option>' + 
+            alunos.map(a => `<option value="${a.id}">${a.nome}</option>`).join('');
+    }
+    
+    const alunoTreinoSelect = document.getElementById('alunoTreino');
+    if (alunoTreinoSelect) {
+        alunoTreinoSelect.innerHTML = '<option value="">Selecione o aluno</option>' + 
+            alunos.map(a => `<option value="${a.id}">${a.nome}</option>`).join('');
+    }
+    
+    // Dashboard stats
+    const totalAlunos = alunos.length;
+    const totalReceita = pagamentos.reduce((s, p) => s + (p.valor || 0), 0);
+    const mediaMensal = pagamentos.length > 0 ? totalReceita / 12 : 0;
+    
+    document.getElementById('totalAlunos').innerText = totalAlunos;
+    document.getElementById('receita').innerText = totalReceita.toFixed(2);
+    document.getElementById('mediaMensal').innerHTML = `R$ ${mediaMensal.toFixed(2)}`;
+    document.getElementById('planosAtivos').innerText = planos.length;
+    
+    // Alertas de inadimplência
+    const hoje = new Date();
+    const atrasados = alunos.filter(a => a.vencimento && new Date(a.vencimento) < hoje);
+    const alertaDiv = document.getElementById('alerta');
+    if (atrasados.length > 0) {
+        alertaDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${atrasados.length} aluno(s) inadimplente(s): ${atrasados.map(a => a.nome).join(', ')}`;
+        alertaDiv.classList.remove('hidden');
+    } else {
+        alertaDiv.classList.add('hidden');
+    }
+    
+    // Gráfico de receita mensal
+    const meses = {};
+    pagamentos.forEach(p => {
+        if (p.data) {
+            const mes = p.data.split('-')[1];
+            meses[mes] = (meses[mes] || 0) + (p.valor || 0);
+        }
+    });
+    
+    const mesesLabels = Object.keys(meses).sort();
+    const mesesValores = mesesLabels.map(m => meses[m]);
+    
+    const ctx = document.getElementById('grafico').getContext('2d');
+    if (chart) chart.destroy();
+    chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: mesesLabels.map(m => `Mês ${m}`),
+            datasets: [{
+                label: 'Receita (R$)',
+                data: mesesValores,
+                borderColor: '#22c55e',
+                backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                tension: 0.4,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    labels: { color: '#e2e8f0' }
+                }
+            },
+            scales: {
+                y: {
+                    ticks: { color: '#e2e8f0' },
+                    grid: { color: '#334155' }
+                },
+                x: {
+                    ticks: { color: '#e2e8f0' },
+                    grid: { color: '#334155' }
+                }
+            }
+        }
+    });
+}
+
+// Utilitários
+function clearForm(fields) {
+    fields.forEach(field => {
+        const element = document.getElementById(field);
+        if (element) element.value = '';
+    });
+}
+
+function showNotification(message, type) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert ${type === 'success' ? 'alert-success' : ''}`;
+    alertDiv.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i> ${message}`;
+    alertDiv.style.position = 'fixed';
+    alertDiv.style.top = '20px';
+    alertDiv.style.right = '20px';
+    alertDiv.style.zIndex = '9999';
+    alertDiv.style.maxWidth = '300px';
+    alertDiv.style.animation = 'slideIn 0.3s ease';
+    
+    document.body.appendChild(alertDiv);
+    
+    setTimeout(() => {
+        alertDiv.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => alertDiv.remove(), 300);
+    }, 3000);
+}
+
+// Adicionar estilos de animação
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideIn {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+    @keyframes slideOut {
+        from {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        to {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+    }
+`;
+document.head.appendChild(style);
+
+// Busca de alunos em tempo real
+if (document.getElementById('searchAluno')) {
+    document.getElementById('searchAluno').addEventListener('input', () => loadAll());
+}
+
+// Mensagem inicial sobre o modo de demonstração
+if (demoMode) {
+    setTimeout(() => {
+        showNotification('Modo Demonstração ativo! Use qualquer email/senha para testar. Os dados são salvos localmente.', 'success');
+    }, 500);
+}
+</script>
+</body>
+</html>
